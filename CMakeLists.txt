@@ -13,6 +13,7 @@ set(COMMON_SRC
     server/server.c
     libs/rabin/rabinpoly.c
     libs/sha256/sha256.c
+    libs/crc32/crc32.c
 )
 
 # Application name:
@@ -26,5 +27,6 @@ target_include_directories(network PRIVATE "client/inc")
 target_include_directories(network PRIVATE "server/inc")
 target_include_directories(network PRIVATE "libs/rabin/inc")
 target_include_directories(network PRIVATE "libs/sha256/inc")
+target_include_directories(network PRIVATE "libs/crc32/inc")
 
 target_sources(network PRIVATE ${COMMON_SRC})
