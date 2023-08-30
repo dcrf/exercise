@@ -17,10 +17,12 @@
 #include "client.h"
 #include "common.h"
 #include "sha256.h"
+#include "rabinpoly.h"
 
 #include <arpa/inet.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <unistd.h>
 #include <netdb.h>
 #include <errno.h>
 #include <poll.h>
@@ -33,6 +35,9 @@
 // b) Calculate Rabin fingerprints
 // c) Exchange message with server side
 static uint8_t common_buffer[8u * 1024u] = { 0 };
+
+// Auxiliary buffer for debug purposes:
+static char debug_buffer[128u] = { 0 };
 
 /**
  * @brief Auxiliary  file transfer steps to drive transfer FSM.
@@ -48,21 +53,30 @@ typedef enum
 
 typedef struct 
 {
+    size_t offset;
+    size_t length;
+} rubin_slice_t;
+
+typedef struct 
+{
     const char *p_server_ipv4;
     const char *p_server_port;
     const char *p_file_name;
     uint8_t *p_buffer;     
     volatile bool *p_run;
+    RabinPoly *p_rabin_ctx;
     bool file_exists;
     uint8_t file_sha256_hash[SHA256_DIGEST_SIZE];
     client_file_op_t current_operation;
-    client_file_op_t next_operation;
+    client_file_op_t next_operation;    
     int socket;
 } client_app_ctx;
 
 
-// Auxiliary functions:
+static void cleanup(void);
 static int32_t connect_with_remote_server(void);
+static bool rubin_get_next_block(rubin_slice_t *p_slice);
+
 
 static client_app_ctx client = { 0 };
 
@@ -96,7 +110,13 @@ int32_t run_application_in_client_mode(const char *p_server_ipv4,
     if (client.file_exists)
     {
         file_calculate_sha256(p_file_name, client.p_buffer, sizeof(common_buffer), client.file_sha256_hash);
+        printf("\r\nFile: %s - SHA-256 digest:%s\r\n", p_file_name, convert_to_hex(client.file_sha256_hash, SHA256_DIGEST_SIZE, debug_buffer));
     }
+    else
+    {
+        printf("\r\nFile: %s does not exist in local folder\r\n", p_file_name);
+    }
+    
 
     if (!connect_with_remote_server())
     {
@@ -110,19 +130,37 @@ int32_t run_application_in_client_mode(const char *p_server_ipv4,
     // b) The requested file was properly updated (full file transfer or diff transfer based on Rabin fingerprints)
     // c) The server does not respond the client for a period of 90s.
 
-    struct pollfd pfds[1];
+    struct pollfd pfds[1] = { 0 };
+    
     pfds[0].fd = client.socket;
     pfds[0].events = POLLIN | POLLERR;
 
-    for (;;)
+    while (*client.p_run)
     {
-        poll(pfds, 1, CLIENT_COMMUNICATION_TIMEOUT_MS)
+        const int result = poll(pfds, 1, CLIENT_COMMUNICATION_TIMEOUT_MS);
 
+        if (0 == result)
+        {
+            // Client socket has timed-out
+            break;
+        }
+        else
+        {
+            if (pfds[0].revents & POLLIN)
+            {
+                // Socket is ready to receive data from server
+            }
+            else if (pfds[0].revents & POLLERR)
+            {
+                // Socket error
+                break;
+            }
+        }
+    }
 
+    cleanup();
 
-    }    
-
-    return 0;
+    return result;
 }
 
 static int32_t connect_with_remote_server(void)
@@ -179,7 +217,7 @@ static int32_t connect_with_remote_server(void)
             break;
         }
 
-        printf("\r\nFailed to connect to remote server address %s:%s\r\n", client.p_server, client.p_port);
+        printf("\r\nFailed to connect to remote server address %s:%s\r\n", client.p_server_ipv4, client.p_server_port);
         printf("Retry in 1[s]\r\n");
         sleep(1u);
     }    
@@ -187,4 +225,62 @@ static int32_t connect_with_remote_server(void)
     freeaddrinfo(p_result);
 
     return result;
-} 
+}
+
+static void initialize_rubin_context(void)
+{
+    const unsigned int window_size = 32u;
+	const size_t min_block_size = 2u * 1024u;
+	const size_t avg_block_size = 4u * 1024u;
+	const size_t max_block_size = 8u * 1024u;
+
+    // Using minimum possible value to reduce the size of block of dynamic memory allocated.
+    // The drawback is a slighly increase in the processing time.
+	const size_t buf_size = max_block_size * 2u;   
+
+    // One possible optimization would be:
+    // a) Analyse the size of the file to be sliced
+    // b) Create a table of optimal Rabin block sizes based on the file size
+    // c) Our initialization function uses block sizes optimized for the file size (small, medium, large)
+
+    if (NULL != client.p_rabin_ctx)
+    {
+        rp_free(client.p_rabin_ctx);
+        client.p_rabin_ctx = NULL;
+    }
+    
+    client.p_rabin_ctx = rp_new(window_size, avg_block_size, min_block_size, max_block_size, buf_size);
+
+    rp_from_file(client.p_rabin_ctx, client.p_file_name);
+}
+
+/**
+ * @brief Returns a Rubin slice offset and length
+ * 
+ * @param p_slice Rubin slice structure to be filled
+ * @return true  There are more slices to be returned
+ * @return false There are no more slices to be returned
+ */
+static bool rubin_get_next_block(rubin_slice_t *p_slice)
+{
+    const bool more_slices_to_process = (0 != rp_block_next(client.p_rabin_ctx)) ? false : true;
+
+    p_slice->offset = client.p_rabin_ctx->block_streampos;
+    p_slice->length = client.p_rabin_ctx->block_size;
+
+#if defined(CLIENT_DBG)
+    static size_t counter = 0;
+    printf("\r\nRabin Slice[%zu] - Offset: %zu - Size: %zu", counter++, rp->block_streampos, rp->block_size);
+#endif
+
+    return more_slices_to_process;
+}
+
+static void cleanup(void)
+{
+    // Cleanup Rabin infra-structure:
+    if (NULL != client.p_rabin_ctx)
+    {
+        rp_free(client.p_rabin_ctx);        
+    }
+}

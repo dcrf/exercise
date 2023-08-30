@@ -38,7 +38,6 @@ typedef enum
     APP_UNKNOWN_MODE = 2
 } app_mode_t;
 
-
 /**
  * @brief Checks if a string contains a valid IPv4 address
  * 
@@ -68,5 +67,15 @@ bool file_exists(const char *p_file_name);
  * @return false 
  */
 bool file_calculate_sha256(const char *p_file_name, uint8_t *p_data_buffer, size_t size, uint8_t *p_sha256_digest);
+
+/**
+ * @brief Auxiliary debug function to convert a hexadecimal buffer into a string (based on code from stack overflow)
+ * 
+ * @param p_input_buffer Input bytes to be converted to string
+ * @param p_output_buffer Output buffer with input buffer converted to ASCII
+ * @param length Size of the input buffer
+ * @return Pointer to output buffer (null terminated)
+ */
+const char * convert_to_hex(const uint8_t *p_input_buffer, int32_t length, char * p_output_buffer);
 
 #endif //COMMON_HEADER_

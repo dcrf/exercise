@@ -16,6 +16,7 @@
 
 #include "common.h"
 #include "sha256.h"
+#include "rabinpoly.h"
 
 #include <stdio.h>
 #include <sys/socket.h>
@@ -63,4 +64,21 @@ bool file_calculate_sha256(const char *p_file_name, uint8_t *p_data_buffer, size
    memcpy(p_sha256_digest, p_file_digest_calculated, SHA256_DIGEST_SIZE);
 
    return true;
+}
+
+// Based on: https://stackoverflow.com/a/53966346
+const char * convert_to_hex(const uint8_t *p_input_buffer, int32_t length, char * p_output_buffer)
+{
+   const char hardcoded[] = "0123456789ABCDEF";
+
+   const int32_t terminate = length;
+   
+   while(--length >= 0)
+   {
+      p_output_buffer[length] = hardcoded[(p_input_buffer[length >> 1] >> ((1 - ( length & 1)) << 2)) & 0xF];
+   }
+
+   p_output_buffer[terminate] = 0x00;
+
+   return p_output_buffer;
 }

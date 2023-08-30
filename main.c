@@ -30,7 +30,7 @@ static void signal_handler(int signal);
 #define APP_SERVER_MIN_PORT_VALUE   (1025)
 
 // Client mode auxiliary constants:
-#define APP_CLIENT_NUMBER_ARGUMENTS (4)    // network client 192.168.10.23 3456 file.txt
+#define APP_CLIENT_NUMBER_ARGUMENTS (5)    // network client 192.168.10.23 3456 file.txt
 #define APP_CLIENT_IP_INDEX         (2)
 #define APP_CLIENT_PORT_INDEX       (3)
 #define APP_CLIENT_FILENAME_INDEX   (4)

@@ -3,3 +3,6 @@
 
 # visual studio config files
 .vscode*
+
+# testing files folder
+/files
