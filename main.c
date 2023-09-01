@@ -26,8 +26,8 @@ static void signal_handler(int signal);
 
 // Auxiliary constants to sanity check user inputs:
 #define APP_OPERATION_MODE_INDEX    (1)
-#define APP_USER_MIN_ARGUMENTS      (3)    // network server 23456
-#define APP_SERVER_MIN_PORT_VALUE   (1025)
+#define APP_USER_MIN_ARGUMENTS      (3)     // network server 23456
+#define APP_SERVER_MIN_PORT_VALUE   (1024)  // First 1024 ports are reserved for Admin services
 
 // Client mode auxiliary constants:
 #define APP_CLIENT_NUMBER_ARGUMENTS (5)    // network client 192.168.10.23 3456 file.txt
@@ -47,9 +47,6 @@ static volatile bool app_run = true;
 
 int main(int argc, char **argv)
 {
-    // Sanity check the command line arguments and detect application running mode:
-    // client, server or unknown
-
     const app_mode_t app_mode = app_identify_running_mode(argc, argv);
 
     if (APP_UNKNOWN_MODE == app_mode)
@@ -58,8 +55,10 @@ int main(int argc, char **argv)
         exit(-1);
     }
 
-    // Register signal infra-structure to let the user gracefully shutdown the application:
-    signal(SIGINT, signal_handler);    
+    // Register signal infra-structure to let the user gracefully request an application shutdown:
+    signal(SIGINT, signal_handler);
+
+    int32_t result = -1;
 
     if (APP_CLIENT_MODE == app_mode)
     {
@@ -67,7 +66,7 @@ int main(int argc, char **argv)
         const char *p_port  = argv[APP_CLIENT_PORT_INDEX];
         const char *p_file  = argv[APP_CLIENT_FILENAME_INDEX];        
         
-        (void) run_application_in_client_mode(p_ip, p_port, p_file, &app_run);
+        result = run_application_in_client_mode(p_ip, p_port, p_file, &app_run);
     }
     else if (APP_SERVER_MODE == app_mode)
     {
@@ -83,7 +82,7 @@ int main(int argc, char **argv)
         printf("\r\nThe user requested to shutdown the %s application.\r\n", (app_mode == APP_CLIENT_MODE) ? "CLIENT" : "SERVER");
     }
     
-    return 0;
+    return result;
 }
 
 /**
@@ -105,42 +104,28 @@ static app_mode_t app_identify_running_mode(int argc, char *argv[])
     if ((APP_CLIENT_NUMBER_ARGUMENTS == argc) && 
         (strcmp("client", argv[APP_OPERATION_MODE_INDEX]) == 0))
     {
-        // Validate the IPv4 supplied:
+        // Validate the IPv4 address supplied by the user:
         const char *p_ip_address = argv[APP_CLIENT_IP_INDEX];
         
         if (!is_valid_ipv4(p_ip_address))
         {
-            printf("\r\nThe Ipv4 [%s] is invalid!", p_ip_address);
+            printf("\r\nThe Ipv4 [%s] is invalid", p_ip_address);
             return mode;
         }
 
-        // Validate the port supplied:
+        // Validate the port supplied by the user:
         const char *p_port = argv[APP_CLIENT_PORT_INDEX];
         const long port = convert_port_string_to_numeric(p_port);
 
-        if (port < APP_SERVER_MIN_PORT_VALUE)
-        {
-            printf("\r\nThe port value [%ld] is invalid. It should be > 1025", port);
-            return mode;
-        }
-
-        // We are in client mode:
-        mode = APP_CLIENT_MODE;
+        mode = (port <= APP_SERVER_MIN_PORT_VALUE) ? APP_UNKNOWN_MODE : APP_CLIENT_MODE;       
     }
     else if (strcmp("server", argv[APP_OPERATION_MODE_INDEX]) == 0)
     {
-        // Validate the port supplied:
+        // Validate the port supplied by the user:
         const char *p_port = argv[APP_SERVER_PORT_INDEX];
         const long port = convert_port_string_to_numeric(p_port);
 
-        if (port < APP_SERVER_MIN_PORT_VALUE)
-        {
-            printf("\r\nThe port value [%ld] is invalid. It should be > 1025", port);
-            return mode;
-        }
-
-        // We are in server mode:
-        mode = APP_SERVER_MODE;
+        mode = (port <= APP_SERVER_MIN_PORT_VALUE) ? APP_UNKNOWN_MODE : APP_SERVER_MODE;        
     }
     else
     {
@@ -160,7 +145,7 @@ static void signal_handler(int signal)
     if (SIGINT == signal)
     {
         // User sent a CTRL+C
-        // Start the application shutdown.
+        // Start the application shutdown process.
 
         app_run = false;
     }
@@ -176,6 +161,12 @@ static long int convert_port_string_to_numeric(const char *p_port_value)
 {
     char *p_end = NULL;
     const long int port = strtol(p_port_value, &p_end, 10);
+
+    if (port < APP_SERVER_MIN_PORT_VALUE)
+    {
+        printf("\r\nThe port value [%ld] is invalid. It should be greater than %d", port, APP_SERVER_MIN_PORT_VALUE);        
+    }
+
     return port;
 }
 

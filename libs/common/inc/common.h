@@ -28,6 +28,19 @@
 #define DO_NOTHING()    do{}while(0)
 
 /**
+ * @brief Auxiliary CLIENT file transfer steps
+ * 
+ */
+typedef enum
+{
+    CLIENT_RECEIVED_CMD_FULL,
+    CLIENT_RECEIVED_CMD_PARTIAL,
+    CLIENT_RECEIVED_CMD_ERROR,
+    CLIENT_RECEIVED_FULL_FILE,
+    CLIENT_NO_OPERATION
+} client_file_op_t;
+
+/**
  * @brief Enumeration of application running modes
  * 
  */

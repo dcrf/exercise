@@ -26,6 +26,7 @@ target_compile_options(network PRIVATE -Wall -Wextra -Werror)
 # Path to include folders:
 target_include_directories(network PRIVATE "client/inc")
 target_include_directories(network PRIVATE "server/inc")
+target_include_directories(network PRIVATE "commands/inc")
 target_include_directories(network PRIVATE "libs/common/inc")
 target_include_directories(network PRIVATE "libs/rabin/inc")
 target_include_directories(network PRIVATE "libs/sha256/inc")
