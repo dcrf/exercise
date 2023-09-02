@@ -38,6 +38,9 @@ static void signal_handler(int signal);
 // Server mode auxiliary constant:
 #define APP_SERVER_PORT_INDEX       (2)    // network server 23456
 
+// Sanity check the maximum size of the file name:
+#define FILE_NAME_MAX_STRING_SIZE   (32) 
+
 /**
  * @brief Used to request the application to shutdown itself
  *        All allocated resources will be freed and/or closed.
@@ -113,6 +116,15 @@ static app_mode_t app_identify_running_mode(int argc, char *argv[])
             return mode;
         }
 
+        // Validate the size of the filename (for design reasons we are limiting it to 32 characters):
+        const size_t file_name_size = strlen(argv[APP_CLIENT_FILENAME_INDEX]);
+
+        if (file_name_size > FILE_NAME_MAX_STRING_SIZE)
+        {
+            printf("\r\nThe requested file name %s string shall not exceed %d characters", argv[APP_CLIENT_FILENAME_INDEX], FILE_NAME_MAX_STRING_SIZE);
+            return mode;
+        }
+
         // Validate the port supplied by the user:
         const char *p_port = argv[APP_CLIENT_PORT_INDEX];
         const long port = convert_port_string_to_numeric(p_port);
@@ -181,6 +193,7 @@ static void app_print_helper_message(void)
     printf("\r\nRunning in client mode:\r\n");    
     printf("\tnetwork client <server ipv4> <server port> <file name>\r\n");
     printf("\tExample: network client 192.168.1.20 25000 music.txt\r\n");
+    printf("\t\tThe file name string shall not exceed 32 characters\r\n");
     printf("\r\n");
     printf("\r\nRunning in server mode:\r\n");
     printf("\tnetwork server <listening port> - Where port value shall be larger than 1025\r\n");

@@ -27,18 +27,11 @@
 
 #define DO_NOTHING()    do{}while(0)
 
-/**
- * @brief Auxiliary CLIENT file transfer steps
- * 
- */
-typedef enum
-{
-    CLIENT_RECEIVED_CMD_FULL,
-    CLIENT_RECEIVED_CMD_PARTIAL,
-    CLIENT_RECEIVED_CMD_ERROR,
-    CLIENT_RECEIVED_FULL_FILE,
-    CLIENT_NO_OPERATION
-} client_file_op_t;
+// Rabin Fingerprint constants:
+#define RABIN_WINDOW_SIZE       (32u)
+#define RABIN_MIN_BLOCK_SIZE    (2u * 1024u)
+#define RABIN_AVG_BLOCK_SIZE    (4u * 1024u)
+#define RABIN_MAX_BLOCK_SIZE    (8u * 1024u)
 
 /**
  * @brief Enumeration of application running modes
@@ -70,16 +63,24 @@ bool is_valid_ipv4(const char *p_ipv4);
 bool file_exists(const char *p_file_name);
 
 /**
- * @brief Calculates the SHA-256 hash of a file contents
+ * @brief Calculates the SHA-256 hash of a whole file contents
  * 
  * @param p_file_name File name which SHA256 will be calculated
  * @param p_data_buffer Temporary buffer to read file data
  * @param size Size of temporary data buffer in bytes
- * @param p_sha256_digest Pointer to a buffer (32 bytes) to receive the SHA-256 digest
- * @return true 
- * @return false 
+ * @param p_sha256_digest Pointer to a buffer (32 bytes) to receive the SHA-256 digest 
  */
-bool file_calculate_sha256(const char *p_file_name, uint8_t *p_data_buffer, size_t size, uint8_t *p_sha256_digest);
+void file_calculate_sha256(const char *p_file_name, uint8_t *p_data_buffer, size_t size, uint8_t *p_sha256_digest);
+
+/**
+ * @brief Calculates the SHA-256 of a slice of a file
+ * 
+ * @param file Stream file descriptor of file to read its slices
+ * @param offset Offset within the file to start reading data
+ * @param size Number of bytes to read starting at 'offset'
+ * @param p_sha256_digest SHA-256 hash of the slice 
+ */
+void file_calculate_sha256_slice(FILE *file, long offset, uint16_t size, uint8_t *p_sha256_digest);
 
 /**
  * @brief Auxiliary debug function to convert a hexadecimal buffer into a string (based on code from stack overflow)
@@ -90,5 +91,15 @@ bool file_calculate_sha256(const char *p_file_name, uint8_t *p_data_buffer, size
  * @return Pointer to output buffer (null terminated)
  */
 const char * convert_to_hex(const uint8_t *p_input_buffer, int32_t length, char * p_output_buffer);
+
+/**
+ * @brief Compare received and calculated CRC32 of a command
+ * 
+ * @param p_buffer Buffer containing the full command
+ * @param length Number of bytes in p_buffer
+ * @return true 
+ * @return false 
+ */
+bool is_crc32_valid(const uint8_t *p_buffer, const uint32_t length);
 
 #endif //COMMON_HEADER_
