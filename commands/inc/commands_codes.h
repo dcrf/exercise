@@ -1,23 +1,23 @@
 // Copyright 2023 dfranca
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-typedef enum 
+typedef enum
 {
     SERVER_READY_CMD = 0x00,                // Server to Client (after client`s connection was established and a worker thread is available to process it)
 
     REQUEST_FILE_STS_CMD,                       // Client to Server: Client will request file information from server side
-    REQUEST_FILE_STS_SERVER_RESPONSE_CMD,       // Server to Client: Server side will 
+    REQUEST_FILE_STS_SERVER_RESPONSE_CMD,       // Server to Client: Server side will
 
     REQUEST_FILE_TRANSFER_CMD,                  // Client to server: Sending Rabin fingerprint or requesting the whole file to be transferred.
     REQUEST_FILE_TRANSFER_SERVER_RESPONSE_CMD   // Server to client: Server will send diffs based on Rabin fingerprints or the whole file to the client.
@@ -50,7 +50,7 @@ typedef enum
 // Where:
 // 0xAA and 0x55 protocol header
 // L1 L2: 16 bits length which contains CMD + <PAYLOAD> (does not include CRC32)
-// CRC32: 32 bits 
+// CRC32: 32 bits
 
 #define PROTOCOL_HEADER_BYTE_A_INDEX    (0x00)
 #define PROTOCOL_HEADER_BYTE_B_INDEX    (0x01)

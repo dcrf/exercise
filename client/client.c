@@ -1,12 +1,12 @@
 /**
  * Copyright 2023 dfranca
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -43,8 +43,8 @@ static char debug_buffer[128u] = { 0 };
 #endif
 
 /**
- * @brief Client FSM steps
- * 
+ * @brief Auxiliary steps to drive client`s FSM
+ *
  */
 typedef enum
 {
@@ -52,23 +52,14 @@ typedef enum
     CLIENT_RECEIVED_CMD_ERROR,
     CLIENT_RECEIVED_CMD_PARTIAL,
     CLIENT_RECEIVED_CMD_FULL,
-    CLIENT_RECEIVED_FULL_FILE,
-
-    CLIENT_REQUEST_FILE,
-    CLIENT_REQUEST_FILE_WITH_RABIN_FINGERPRINTS,
-
-    CLIENT_PROCESS_RECEIVED_CMD,
-    
-    CLIENT_SEND_CMD_TO_SERVER,
-
-    CLIENT_NO_OPERATION
+    CLIENT_RECEIVED_FULL_FILE
 } client_file_op_t;
 
 /**
  * @brief Auxiliary struct to store Rabin fingerprint blocks
- * 
+ *
  */
-typedef struct 
+typedef struct
 {
     uint32_t offset;
     uint16_t length;
@@ -77,23 +68,23 @@ typedef struct
 
 /**
  * @brief Client context structure
- * 
+ *
  */
-typedef struct 
+typedef struct
 {
     volatile bool *p_run;
     const char *p_server_ipv4;
     const char *p_server_port;
     const char *p_file_name;
-    uint8_t *p_buffer;    
+    uint8_t *p_buffer;
     RabinPoly *p_rabin_ctx;
     FILE *p_file_stream;
     FILE *p_auxiliar_file;
     size_t buffer_size;
     size_t buffer_receive_offset;
-    client_file_op_t operation;    
+    client_file_op_t operation;
     bool file_exists;
-    uint8_t file_sha256_hash[SHA256_DIGEST_SIZE];    
+    uint8_t file_sha256_hash[SHA256_DIGEST_SIZE];
     int socket;
 } client_app_ctx;
 
@@ -102,17 +93,18 @@ static void cleanup(void);
 static void initialize_rabin_context(void);
 static void finalize_command_adding_length_and_crc32(uint16_t *p_write_index);
 static void update_local_file_with_data_received(void);
-static bool rabin_get_next_block(rabin_slice_t *p_slice);
-static bool client_transmit_to_server(int socket, const uint8_t *p_buffer, const uint32_t size);
-static int32_t connect_with_remote_server(void);
-static int32_t process_file_transfer(void);
-static client_file_op_t receive_data_stream(void);
-static client_file_op_t process_full_command(void);
 static void process_server_ready_cmd(void);
-static client_file_op_t process_file_transfer_from_server_cmd(void);
-static client_file_op_t process_request_file_status_server_response_cmd(void);
 static void client_request_whole_file_without_rabin_fingerprints(void);
 static void client_request_file_diff_using_rabin_fingerprints(void);
+static bool rabin_get_next_block(rabin_slice_t *p_slice);
+static bool client_transmit_to_server(int socket, const uint8_t *p_buffer, const uint32_t size);
+static client_file_op_t receive_data_stream(void);
+static client_file_op_t process_full_command(void);
+static client_file_op_t process_file_transfer_from_server_cmd(void);
+static client_file_op_t process_request_file_status_server_response_cmd(void);
+static int32_t connect_with_remote_server(void);
+static int32_t process_file_transfer(void);
+
 
 // Client file transfer context variable:
 static client_app_ctx client = { 0 };
@@ -121,10 +113,10 @@ static client_app_ctx client = { 0 };
 // a) A CTRL + C was intercepted to exit the application.
 // b) The requested file does not exist on the server.
 // c) The local and requested files are the same.
-// d) The requested file was transferred from server to client.        
+// d) The requested file was transferred from server to client.
 // e) No response (connect/send/receive) from the server after 90s.
 
-int32_t run_application_in_client_mode(const char *p_server_ipv4, 
+int32_t run_application_in_client_mode(const char *p_server_ipv4,
                                        const char *p_server_port,
                                        const char *p_file_name,
                                        volatile bool *p_run)
@@ -149,7 +141,7 @@ int32_t run_application_in_client_mode(const char *p_server_ipv4,
     client.socket = -1;
 
     memset(client.file_sha256_hash, 0x00, SHA256_DIGEST_SIZE);
-    
+
     // Check if the requested file exists on client side:
     client.file_exists = file_exists(p_file_name);
 
@@ -169,12 +161,12 @@ int32_t run_application_in_client_mode(const char *p_server_ipv4,
     }
 
     // Try to stablish a TCP connection with the remote server:
-    result = connect_with_remote_server();    
+    result = connect_with_remote_server();
 
     if (0 != result)
     {
         cleanup();
-        return result;        
+        return result;
     }
 
     // Client application will return from the next function only when one of these conditions happens:
@@ -187,7 +179,7 @@ int32_t run_application_in_client_mode(const char *p_server_ipv4,
     // c) The server does not respond the client for a period of 90s after any socket transaction
     // d) User has requested the application to exit (CTRL + C)
 
-    result = process_file_transfer();    
+    result = process_file_transfer();
 
     // Deallocate internal resources before exiting client application:
     cleanup();
@@ -203,7 +195,7 @@ static int32_t process_file_transfer(void)
 
     pfds[0].fd = client.socket;
     pfds[0].events = POLLIN | POLLERR | POLLHUP;
-    
+
     const int socket_timeout_ms = 5000;
     int32_t timeout_counter = CLIENT_COMMUNICATION_TIMEOUT_MS / socket_timeout_ms;
 
@@ -242,7 +234,7 @@ static int32_t process_file_transfer(void)
                 else if (client.operation == CLIENT_RECEIVED_CMD_PARTIAL)
                 {
                     // Continue receiving data
-                }         
+                }
             }
             else // POLLERR | POLLHP
             {
@@ -261,7 +253,7 @@ static client_file_op_t receive_data_stream(void)
     // Need to deal with partial commands that were segmented by TCP stack
 
     client_file_op_t operation = CLIENT_RECEIVED_CMD_ERROR;
-    
+
     const ssize_t received_bytes = recv(client.socket, client.p_buffer + client.buffer_receive_offset, client.buffer_size, 0);
 
     if (-1 == received_bytes)
@@ -288,7 +280,7 @@ static client_file_op_t receive_data_stream(void)
     }
     else
     {
-        const size_t full_command_size = sizeof(uint8_t) + sizeof(uint8_t) + sizeof(uint16_t) + length + sizeof(uint32_t); 
+        const size_t full_command_size = sizeof(uint8_t) + sizeof(uint8_t) + sizeof(uint16_t) + length + sizeof(uint32_t);
 
         if (full_command_size <= client.buffer_receive_offset)
         {
@@ -308,24 +300,24 @@ static client_file_op_t receive_data_stream(void)
 
 static client_file_op_t process_full_command(void)
 {
-    // Here we have a full command received from the server side. 
+    // Here we have a full command received from the server side.
     // The command was sanity checked: protocol headers and CRC32.
 
-    // The protocol between client and server is very simple to make each command 'self-contained' in terms of 
+    // The protocol between client and server is very simple to make each command 'self-contained' in terms of
     // processing and consequenct actions.
     // The client side will receive a response from the server and trigger its consequent actions.
 
     client_file_op_t next_operation;
 
     // Reads command received:
-    const uint8_t command = client.p_buffer[PROTOCOL_HEADER_CMD_INDEX];    
+    const uint8_t command = client.p_buffer[PROTOCOL_HEADER_CMD_INDEX];
 
     switch (command)
     {
-        // This command is received by the client application when the server application has a 
+        // This command is received by the client application when the server application has a
         // working poll thread available to start processing our file transfer validation.
         // Afer processing the 'SERVER_READY_CMD' command the client side will send a 'REQUEST_FILE_STS_CMD' command to server.
-        case (SERVER_READY_CMD):            
+        case (SERVER_READY_CMD):
             process_server_ready_cmd();
             break;
 
@@ -334,7 +326,7 @@ static client_file_op_t process_full_command(void)
         // 1. Do nothing. Requested file does not exist on server.
         // 2. Do nothing. Server and client files have the same contents (SHA256 digest)
         // 3. Client application will request a file transfer to the server using Rabin blocks to save bandwidth or request a whole file transfer.
-        case (REQUEST_FILE_STS_SERVER_RESPONSE_CMD):            
+        case (REQUEST_FILE_STS_SERVER_RESPONSE_CMD):
             next_operation = process_request_file_status_server_response_cmd();
             break;
 
@@ -344,7 +336,7 @@ static client_file_op_t process_full_command(void)
         // The client application will store the received slices into a temporary file (to avoid corrupting the original client file).
         // Once all the slices were received from the server the client will update its local file with data from its temporary file.
         // If Rabin fingerprints were used the temporary file should have only the data segments that are different between client and server`s file
-        case (REQUEST_FILE_TRANSFER_SERVER_RESPONSE_CMD):           
+        case (REQUEST_FILE_TRANSFER_SERVER_RESPONSE_CMD):
             next_operation = process_file_transfer_from_server_cmd();
             break;
 
@@ -363,19 +355,19 @@ static client_file_op_t process_file_transfer_from_server_cmd(void)
     // The data slices can be only the data segments that differs between the files or a a complete sequential file data transfer.
     // Both Rabin slices and complete data transfer slices will follow the same format:
     // offset (32 bits), length (16 bits), payload data (length bytes)
-    
-    
+
+
     // Using a random generic file to avoid corrupting local file during file transfer:
     if (client.p_auxiliar_file == NULL)
     {
-        client.p_auxiliar_file = tmpfile();       
+        client.p_auxiliar_file = tmpfile();
     }
 
-    // Process the received data from server: 
+    // Process the received data from server:
     // 1. Can be diffs or the whole data being transferred
     // 2. For now it doesn`t matter which one is happening.
     // 3. After the server signals the client that the transfer has finished the client will process the data received to update the local file
-    
+
     uint16_t n_length = 0;
     memcpy(&n_length, &client.p_buffer[PROTOCOL_HEADER_LENGTH_INDEX], sizeof(uint16_t));
 
@@ -392,7 +384,7 @@ static client_file_op_t process_file_transfer_from_server_cmd(void)
 
         read_payload_offset += bytes_written;
         total_bytes_to_write -= bytes_written;
-    };    
+    };
 
     // Check if this was the last file slice received from server:
 
@@ -430,7 +422,7 @@ static void update_local_file_with_data_received(void)
 
     // Step1: Read data from temporary file into a local buffer
     // Step2: Write data from this local buffer into local file
-    // Step3: Repeat Step1 and Step2 untill all file was copied from buffer to final file    
+    // Step3: Repeat Step1 and Step2 untill all file was copied from buffer to final file
 
     for (;;)
     {
@@ -442,10 +434,10 @@ static void update_local_file_with_data_received(void)
             // We reached the end of the temporary file
             break;
         }
-        
+
         uint32_t n_offset = 0;
         memcpy(&n_offset, client.p_buffer, sizeof(uint32_t));
-        const uint32_t slice_offset = ntohl(n_offset);        
+        const uint32_t slice_offset = ntohl(n_offset);
 
         // Read a data slice length from auxiliar file:
         bytes_read = fread(client.p_buffer, sizeof(uint8_t), sizeof(uint16_t), client.p_auxiliar_file);
@@ -457,7 +449,7 @@ static void update_local_file_with_data_received(void)
         // Read a slice data from our temporary file into the local buffer:
         ssize_t remaining_bytes = slice_length;
         void *p_buffer = client.p_buffer;
-        
+
         while (remaining_bytes)
         {
             bytes_read = fread(p_buffer, sizeof(uint8_t), remaining_bytes, client.p_auxiliar_file);
@@ -482,14 +474,14 @@ static void update_local_file_with_data_received(void)
         }
     }
 
-    // Files clean-up will happen inside cleanup() function   
+    // Files clean-up will happen inside cleanup() function
 }
 
 static client_file_op_t process_request_file_status_server_response_cmd(void)
 {
     // This command is sent from the server to the client application and contains information about the file on the server side.
     // The client will analyse the response and choose its consequent actions:
-    
+
     // Client will sanity-check if the requested file does not exist on the server or if their contents are the same:
     const uint8_t server_file_status = client.p_buffer[PROTOCOL_START_PAYLOAD_INDEX];
 
@@ -506,7 +498,7 @@ static client_file_op_t process_request_file_status_server_response_cmd(void)
         case (FILE_EXIST_ON_SERVER_WITH_SAME_HASH):
             printf("\r\nThe local and requested file %s have the same contents", client.p_file_name);
             printf("\r\nClient application will finish");
-            next_operation = CLIENT_RECEIVED_FULL_FILE; // This operation will trigger the exit process.            
+            next_operation = CLIENT_RECEIVED_FULL_FILE; // This operation will trigger the exit process.
             break;
 
         case (FILE_EXIST_ON_SERVER_WITH_DIFFERENT_HASH):
@@ -534,11 +526,11 @@ static client_file_op_t process_request_file_status_server_response_cmd(void)
 static void client_request_file_diff_using_rabin_fingerprints(void)
 {
     // The client application will transfer to the server application its file`s set of Rabin fingerprints
-    // The last fingerprint command sent to the server will carry a special code to 
+    // The last fingerprint command sent to the server will carry a special code to
     // indicate the fingerprints were all transmited and the server can start the process of sending the data diff`s back to the client side.
 
     // Each Rabin Fingerprint will follow this format when added into the command`s payload area:
-    // offset (32 bits), length (16 bits), sha256 (32 bytes)    
+    // offset (32 bits), length (16 bits), sha256 (32 bytes)
 
     // Initialize Rabin context:
     initialize_rabin_context();
@@ -571,7 +563,7 @@ static void client_request_file_diff_using_rabin_fingerprints(void)
 
         // I prefer using this idiom instead of declaring a __packed__ struct
         const size_t rabin_entry_size = sizeof(uint32_t) + sizeof(uint16_t) + SHA256_DIGEST_SIZE;
-        
+
         // This is the available payload area dedicated to add the fingerprints.
         // The extra space to store the protocol headers and CRC32 are discounted from this value.
         size_t available_payload_area = RABIN_MAX_BLOCK_SIZE;
@@ -610,14 +602,14 @@ static void client_request_file_diff_using_rabin_fingerprints(void)
 
         if (!rabin_has_next_block)
         {
-            // This is the last Rabin update command. 
+            // This is the last Rabin update command.
             // Update the sub-command option to signal the server side that all fingerprints were transmitted
             // Server will trigger its logic to generate a diff file to send back to client:
             client.p_buffer[PROTOCOL_START_PAYLOAD_INDEX] = REQUEST_FILE_WITH_RABIN_FINISH;
         }
 
         finalize_command_adding_length_and_crc32(&write_index);
-        client_transmit_to_server(client.socket, client.p_buffer, write_index);        
+        client_transmit_to_server(client.socket, client.p_buffer, write_index);
     };
 }
 
@@ -625,10 +617,10 @@ static void client_request_whole_file_without_rabin_fingerprints(void)
 {
     // Construct command to request a complete file transfer without using Rabin blocks
 
-    uint16_t write_index = 0u;    
-    
+    uint16_t write_index = 0u;
+
     client.p_buffer[write_index++] = PROTOCOL_HEADER_BYTE_A;
-    client.p_buffer[write_index++] = PROTOCOL_HEADER_BYTE_B;    
+    client.p_buffer[write_index++] = PROTOCOL_HEADER_BYTE_B;
 
     client.p_buffer[write_index++] = REQUEST_FILE_TRANSFER_CMD;
 
@@ -646,24 +638,24 @@ static void process_server_ready_cmd(void)
 {
     // After receiving this command from server the client side will ask if a specific file exists on the server side.
     // The following table explains the consequenct actions:
-    // 
+    //
     // FILE_EXISTS_ON_SERVER    FILE_EXISTS_ON_CLIENT       CONSEQUENT_ACTIONS
     //        0                          0                  --> None. There is no file on the server to update the client
     //        0                          1                  --> None. There is no file on the server to update the client
     //        1                          0                  --> Client will request a full file transfer without using Rabin blocks
-    //        1                          1                  --> Two scenarions are possible: 
+    //        1                          1                  --> Two scenarions are possible:
     //                                                          1. Local and remote files have the same contents (same SHA-256 digest)
     //                                                             No file transfer will happen
     //                                                          2. Local and remote files have different contents (different SHA-256 digest)
     //                                                             Transfer file from server to client using Rabin blocks to save bandwidth
 
-    
+
     // Construct command to request the file status on the server side and choose consequent actions:
 
-    uint16_t write_index = 0u;    
-    
+    uint16_t write_index = 0u;
+
     client.p_buffer[write_index++] = PROTOCOL_HEADER_BYTE_A;
-    client.p_buffer[write_index++] = PROTOCOL_HEADER_BYTE_B;    
+    client.p_buffer[write_index++] = PROTOCOL_HEADER_BYTE_B;
 
     // Specify 'REQUEST_FILE_STS_CMD' to send to server:
     client.p_buffer[write_index++] = REQUEST_FILE_STS_CMD;
@@ -695,7 +687,7 @@ static void process_server_ready_cmd(void)
     finalize_command_adding_length_and_crc32(&write_index);
 
     // Sends command to server side:
-    client_transmit_to_server(client.socket, client.p_buffer, write_index);    
+    client_transmit_to_server(client.socket, client.p_buffer, write_index);
 }
 
 static void finalize_command_adding_length_and_crc32(uint16_t *p_write_index)
@@ -744,7 +736,7 @@ static int32_t connect_with_remote_server(void)
     // One second option would be using UDP sockets and implement a basic packet retransmisson/acknowledgement on the applicaton layer.
     // As I have very limited free time I will play safe to have something to show regarding this exercise and go with the TCP.
     // But I know that the exercise explains that our network has a high latency. UDP sockets would be a potential better solution for a real case
-    // product and implementing a rudimentary/basic application retransmission logic. 
+    // product and implementing a rudimentary/basic application retransmission logic.
 
     errno = 0;
     client.socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -779,7 +771,7 @@ static int32_t connect_with_remote_server(void)
         return -1;
     }
 
-    // Try up to CLIENT_CONNECT_RETRIES times to establish a connection with remote server:    
+    // Try up to CLIENT_CONNECT_RETRIES times to establish a connection with remote server:
     for (int32_t i = 0; i < CLIENT_CONNECT_RETRIES; ++i)
     {
         result = connect(client.socket, p_result->ai_addr, p_result->ai_addrlen);
@@ -793,7 +785,7 @@ static int32_t connect_with_remote_server(void)
         printf("\r\nFailed to connect to remote server address %s:%s", client.p_server_ipv4, client.p_server_port);
         printf("\r\nRetry in 1[s]");
         sleep(1u);
-    }    
+    }
 
     freeaddrinfo(p_result);
 
@@ -804,7 +796,7 @@ static void initialize_rabin_context(void)
 {
     // Using minimum possible value to reduce the size of block of dynamic memory allocated.
     // The drawback is a slighly increase in the processing time.
-	const size_t buf_size = RABIN_MAX_BLOCK_SIZE * 2u;   
+	const size_t buf_size = RABIN_MAX_BLOCK_SIZE * 2u;
 
     // One possible optimization would be:
     // a) Analyse the size of the file to be sliced
@@ -816,7 +808,7 @@ static void initialize_rabin_context(void)
         rp_free(client.p_rabin_ctx);
         client.p_rabin_ctx = NULL;
     }
-    
+
     client.p_rabin_ctx = rp_new(RABIN_WINDOW_SIZE, RABIN_AVG_BLOCK_SIZE, RABIN_MIN_BLOCK_SIZE, RABIN_MAX_BLOCK_SIZE, buf_size);
 
     rp_from_file(client.p_rabin_ctx, client.p_file_name);
@@ -824,7 +816,7 @@ static void initialize_rabin_context(void)
 
 /**
  * @brief Returns a Rabin slice offset and length
- * 
+ *
  * @param p_slice Rabin slice structure to be filled
  * @return true  There are more slices to be returned
  * @return false There are no more slices to be returned
@@ -849,7 +841,7 @@ static void cleanup(void)
     // Cleanup the mess before leaving the client application:
     if (NULL != client.p_rabin_ctx)
     {
-        rp_free(client.p_rabin_ctx);        
+        rp_free(client.p_rabin_ctx);
     }
 
     if (-1 != client.socket)

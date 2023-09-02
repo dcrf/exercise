@@ -168,4 +168,3 @@ const uint8_t* SHA256_hash(const void* data, int len, uint8_t* digest) {
     memcpy(digest, SHA256_final(&ctx), SHA256_DIGEST_SIZE);
     return digest;
 }
-
