@@ -191,7 +191,8 @@ static int32_t process_file_transfer(void)
 {
     int32_t result = -1;
 
-    struct pollfd pfds[1] = {0};
+    struct pollfd pfds[1];
+    memset(pfds, 0x00, sizeof(pfds));
 
     pfds[0].fd = client.socket;
     pfds[0].events = POLLIN | POLLERR | POLLHUP;

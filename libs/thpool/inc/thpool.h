@@ -61,10 +61,10 @@ threadpool thpool_init(int num_threads);
  *
  * @param  threadpool    threadpool to which the work will be added
  * @param  function_p    pointer to function to add as work
- * @param  arg_p         pointer to an argument
+ * @param  arg_p         Function argument
  * @return 0 on success, -1 otherwise.
  */
-int thpool_add_work(threadpool, void (*function_p)(void*), void* arg_p);
+int thpool_add_work(threadpool, void (*function_p)(int), int arg);
 
 
 /**
@@ -178,6 +178,14 @@ void thpool_destroy(threadpool);
  * @return integer       number of threads working
  */
 int thpool_num_threads_working(threadpool);
+
+
+/**
+ * @brief Added by DCRF. Returns number of jobs waiting in the queue
+ * 
+ * @return int 
+ */
+int thpool_num_jobs_on_queue(threadpool);
 
 
 #ifdef __cplusplus

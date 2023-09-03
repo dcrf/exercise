@@ -58,8 +58,8 @@ typedef struct bsem {
 /* Job */
 typedef struct job{
 	struct job*  prev;                   /* pointer to previous job   */
-	void   (*function)(void* arg);       /* function pointer          */
-	void*  arg;                          /* function's argument       */
+	void   (*function)(int arg);         /* function pointer          */
+	int    arg;                          /* function's argument       */
 } job;
 
 
@@ -178,7 +178,7 @@ struct thpool_* thpool_init(int num_threads){
 
 
 /* Add work to the thread pool */
-int thpool_add_work(thpool_* thpool_p, void (*function_p)(void*), void* arg_p){
+int thpool_add_work(thpool_* thpool_p, void (*function_p)(int), int arg){
 	job* newjob;
 
 	newjob=(struct job*)malloc(sizeof(struct job));
@@ -189,7 +189,7 @@ int thpool_add_work(thpool_* thpool_p, void (*function_p)(void*), void* arg_p){
 
 	/* add function and argument */
 	newjob->function=function_p;
-	newjob->arg=arg_p;
+	newjob->arg=arg;
 
 	/* add job to queue */
 	jobqueue_push(&thpool_p->jobqueue, newjob);
@@ -271,7 +271,16 @@ int thpool_num_threads_working(thpool_* thpool_p){
 	return thpool_p->num_threads_working;
 }
 
+int thpool_num_jobs_on_queue(thpool_ * thpool_p)
+{
+	int num_jobs = 0;
+	
+	pthread_mutex_lock(&thpool_p->jobqueue.rwmutex);
+	num_jobs = thpool_p->jobqueue.len;
+	pthread_mutex_unlock(&thpool_p->jobqueue.rwmutex);
 
+	return num_jobs;
+}
 
 /* ============================ THREAD ============================== */
 
@@ -360,8 +369,8 @@ static void* thread_do(struct thread* thread_p){
 			pthread_mutex_unlock(&thpool_p->thcount_lock);
 
 			/* Read job from queue and execute it */
-			void (*func_buff)(void*);
-			void*  arg_buff;
+			void (*func_buff)(int);
+			int  arg_buff;
 			job* job_p = jobqueue_pull(&thpool_p->jobqueue);
 			if (job_p) {
 				func_buff = job_p->function;

@@ -21,8 +21,8 @@
 // We belive the server will be mostly IO intensive than CPU intensive
 // Having an IO intensive behaviour we expect that will be common for a worker thread to wait till the low-level IO happens on the Kernel
 // Thats the reason we are creating a relatively large ammount of threads and giving a relation of 3 jobs (file transfer) per worker thread
-#define SERVER_NUMBER_OF_WORKER_THREADS     (16u)
-#define SERVER_MAX_NUMBER_OF_WAITING_JOBS   (3u * SERVER_NUMBER_OF_WORKER_THREADS)
+#define SERVER_NUMBER_OF_WORKER_THREADS     (16)
+#define SERVER_MAX_NUMBER_OF_WAITING_JOBS   (3 * SERVER_NUMBER_OF_WORKER_THREADS)
 
 /**
  * @brief Run the application in server mode

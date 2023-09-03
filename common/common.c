@@ -21,7 +21,6 @@
 #include "crc32.h"
 
 #include <stdio.h>
-#include <sys/socket.h>
 #include <arpa/inet.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -34,6 +33,16 @@ bool is_valid_ipv4(const char *p_ipv4)
    struct sockaddr_in addr = { 0 };
 
    return (1 == inet_pton(AF_INET, p_ipv4, &addr)) ? true : false;
+}
+
+void *get_socket_in_addr_from_sockaddr(struct sockaddr *p_sock_addr)
+{
+   if (p_sock_addr->sa_family == AF_INET)
+   {
+      return &(((struct sockaddr_in *)p_sock_addr)->sin_addr);
+   }
+
+   return NULL;
 }
 
 bool file_exists(const char *p_file_name)

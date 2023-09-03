@@ -21,6 +21,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <signal.h>
+#include <sys/socket.h>
+
 
 #define PRINT_DBG_MSGS  (1)
 #define SUCCESS         (0)
@@ -101,5 +103,13 @@ const char * convert_to_hex(const uint8_t *p_input_buffer, int32_t length, char 
  * @return false
  */
 bool is_crc32_valid(const uint8_t *p_buffer, const uint32_t length);
+
+/**
+ * @brief Auxiliary function to return a 'struct in_addr' from a 'struct sockaddr' pointer
+ * 
+ * @param p_sock_addr 'struct sockaddr' pointer
+ * @return void* ' 
+ */
+void *get_socket_in_addr_from_sockaddr(struct sockaddr *p_sock_addr);
 
 #endif //COMMON_HEADER_
