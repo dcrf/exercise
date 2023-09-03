@@ -184,7 +184,7 @@ static int32_t process_file_transfer(void)
     const int socket_timeout_ms = 5000;
     int32_t timeout_counter = CLIENT_COMMUNICATION_TIMEOUT_MS / socket_timeout_ms;
 
-    while ((*client.p_run) && (timeout_counter > 0))
+    while ((*client.p_run) && (timeout_counter > 0) && (client.operation != RECEIVED_FULL_FILE))
     {
         // Timeout every 5s to give a chance to "client.p_run" being evaluated
         result = poll(pfds, 1, socket_timeout_ms);
@@ -466,6 +466,8 @@ static operation_t process_request_file_status_server_response_cmd(void)
             printf("\r\nReceived unexpected file status response from server side");
             break;
     };
+
+    fflush(stdout);
 
     return next_operation;
 }

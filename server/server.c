@@ -30,6 +30,8 @@
 #include <unistd.h>
 #include <errno.h>
 
+#undef SERVER_DBG
+
 /**
  * @brief Server context variable
  * 
@@ -161,11 +163,19 @@ static int32_t server_process_clients(void)
                         // Do we have enough jobs available to process the new client socket ?
                         if (thpool_num_jobs_on_queue(server.pool) < SERVER_MAX_NUMBER_OF_WAITING_JOBS)
                         {
+                            #ifdef SERVER_DBG
+                                printf("\r\nAdding socket client into worker pool");
+                            #endif
+
                             thpool_add_work(server.pool, file_transfer_worker_function, client_socket);
                         }
                         else
                         {
                             // Unfortunately we have no more available jobs on the queue to store this new client:
+                            #ifdef SERVER_DBG
+                                printf("\r\nCancelling client connection. No more resources available");
+                            #endif
+
                             shutdown(client_socket, SHUT_RDWR);
                             close(client_socket);
                         }
@@ -184,68 +194,6 @@ static int32_t server_process_clients(void)
     return result;
 }
 
-#if 0
-
-while ((*client.p_run) && (timeout_counter > 0))
-    {
-        // Timeout every 5s to give a chance to "client.p_run" being evaluated
-        result = poll(pfds, 1, socket_timeout_ms);
-
-        const short revents = pfds[0].revents;
-
-        if (0 == result)
-        {
-            // Client socket has timed-out:
-            --timeout_counter;
-        }
-        else
-        {
-            // Reload timeout counter:
-            timeout_counter = CLIENT_COMMUNICATION_TIMEOUT_MS / socket_timeout_ms;
-
-            if (revents & POLLIN)
-            {
-                // Socket is ready to receive data from server
-
-                client.operation = receive_data_stream(client.socket, client.p_buffer, &client.buffer_receive_offset, client.buffer_size);
-
-                if (client.operation == RECEIVED_CMD_FULL)
-                {
-                    client.operation = process_full_command();
-                }
-                else if (client.operation == RECEIVED_CMD_ERROR)
-                {
-                    // Resets buffer to start receiving a new command:
-                    client.buffer_receive_offset = 0;
-                }
-                else if (client.operation == RECEIVED_CMD_PARTIAL)
-                {
-                    // Continue receiving data
-                }
-                else if(client.operation == SOCKET_DISCONNECTED_BY_PEER)
-                {
-                    printf("\r\nClient socket %d was disconnected by server side", client.socket);
-                    printf("\r\nExiting client application\r\n");
-                    result = -1;
-                    break;
-                }
-                else if (client.operation == RECEIVED_FULL_FILE)
-                {
-                    printf("\r\nExiting client application: File %s was updated\r\n", client.p_file_name);
-                    result = 0;
-                    break;
-                }
-            }
-            else // POLLERR | POLLHP
-            {
-                result = -1;
-                break;
-            }
-        }
-    }
-
-#endif
-
 static void file_transfer_worker_function(int client_socket)
 {
     int32_t result = -1;
@@ -259,7 +207,7 @@ static void file_transfer_worker_function(int client_socket)
     ctx.buffer_size = sizeof(client_buffer);
     ctx.socket = client_socket;
 
-    ctx.fds[0].fd = client_socket;
+    ctx.fds[0].fd = ctx.socket;
     ctx.fds[0].events = POLLIN | POLLERR | POLLHUP;
 
     const int socket_timeout_ms = 5000;
@@ -300,8 +248,10 @@ static void file_transfer_worker_function(int client_socket)
                 }
                 else if (ctx.operation == SOCKET_DISCONNECTED_BY_PEER)
                 {
-                    printf("\r\nClient socket %d was disconnected", ctx.socket);
-                    printf("\r\nCancelling file operation for client - %d\r\n", ctx.socket);
+                    #ifdef SERVER_DBG
+                        printf("\r\nClient socket %d was disconnected", ctx.socket);
+                        printf("\r\nCancelling file operation for client - %d\r\n", ctx.socket);
+                    #endif
                     result = -1;
                     break;
                 }
@@ -309,7 +259,10 @@ static void file_transfer_worker_function(int client_socket)
         }
     }
 
+#ifdef SERVER_DBG
     printf("\r\nFinishing client file transfer - %d", ctx.socket);
+    fflush(stdout);
+#endif
 
     shutdown(ctx.socket, SHUT_RDWR);
     close(ctx.socket);
@@ -382,16 +335,19 @@ static void process_request_file_sts_cmd(file_transfer_ctx *p_ctx)
 
     // The command option carries information if client has included SHA-256 info in the payload:
     const uint8_t command_option = p_ctx->p_buffer[PROTOCOL_START_PAYLOAD_INDEX];
+
+    uint16_t file_name_size = length - sizeof(uint8_t) - sizeof(uint8_t);
     
     if (FILE_STATUS_WITH_HASH == command_option)
     {
-        // Next 32 bytes contais SHA256 of client file:
+        // Next 32 bytes contains SHA256 of client file:
         memcpy(remote_file_digest, &p_ctx->p_buffer[offset_read], SHA256_DIGEST_SIZE);
         offset_read += SHA256_DIGEST_SIZE;
+
+        file_name_size -= SHA256_DIGEST_SIZE;
     }
 
     // Copy client file name starting at 'offset_read':
-    uint16_t file_name_size = length - offset_read;
     file_name_size = (file_name_size <= FILE_NAME_MAX_STRING_SIZE) ? file_name_size : FILE_NAME_MAX_STRING_SIZE;
     memcpy(p_ctx->file_name, &p_ctx->p_buffer[offset_read], file_name_size);
     p_ctx->file_name[FILE_NAME_MAX_STRING_SIZE] = 0x00;
