@@ -35,16 +35,6 @@ bool is_valid_ipv4(const char *p_ipv4)
    return (1 == inet_pton(AF_INET, p_ipv4, &addr)) ? true : false;
 }
 
-void *get_socket_in_addr_from_sockaddr(struct sockaddr *p_sock_addr)
-{
-   if (p_sock_addr->sa_family == AF_INET)
-   {
-      return &(((struct sockaddr_in *)p_sock_addr)->sin_addr);
-   }
-
-   return NULL;
-}
-
 bool file_exists(const char *p_file_name)
 {
    struct stat file = { 0 };
@@ -118,10 +108,119 @@ const char * convert_to_hex(const uint8_t *p_input_buffer, int32_t length, char 
    return p_output_buffer;
 }
 
+uint16_t payload_extract_length(const uint8_t *p_buffer)
+{
+   // Extract lengtg info from the payload: 
+   // Length includes: CMD + PAYLOAD (not include CRC32 bytes)
+    uint16_t n_length = 0;
+    memcpy(&n_length, &p_buffer[PROTOCOL_HEADER_LENGTH_INDEX], sizeof(uint16_t));
+    return ntohs(n_length);
+}
+
 bool is_crc32_valid(const uint8_t *p_buffer, const uint32_t length)
 {
-    const uint32_t received_crc32   = ntohs(*((uint16_t*)&p_buffer[PROTOCOL_HEADER_LENGTH_INDEX]));
-    const uint32_t calculated_crc32 = crc32(p_buffer, length - sizeof(uint32_t), 0u);
+   const uint32_t crc_index = length - sizeof(uint32_t);
+
+   uint32_t n_crc32 = 0;
+   memcpy(&n_crc32, &p_buffer[crc_index], sizeof(uint32_t));
+ 
+   const uint32_t received_crc32 = ntohl(n_crc32);
+   const uint32_t calculated_crc32 = crc32(p_buffer, crc_index, 0u);
 
     return (calculated_crc32 == received_crc32);
+}
+
+void command_add_length_and_crc32(uint8_t *p_buffer, uint16_t *p_write_index)
+{
+   uint32_t write_index = *p_write_index;
+
+   // Populate correct protocol length: CMD + PAYLOAD
+   const uint16_t cmd_length = htons(sizeof(uint8_t) + (write_index - PROTOCOL_START_PAYLOAD_INDEX)); // CMD + PAYLOAD AREA (not include CRC32)
+   memcpy(&p_buffer[PROTOCOL_HEADER_LENGTH_INDEX], &cmd_length, sizeof(cmd_length));
+
+   // Calculate CRC32:
+   const uint32_t cmd_crc32 = htonl(crc32(p_buffer, write_index, 0u));
+   memcpy(&p_buffer[write_index], &cmd_crc32, sizeof(cmd_crc32));
+
+   write_index += sizeof(cmd_crc32);
+
+   *p_write_index = write_index;
+}
+
+bool command_transfer(int socket, const uint8_t *p_buffer, const uint16_t size)
+{
+    uint8_t retries = 3u;
+    ssize_t remaining_bytes = size;
+
+    do
+    {
+        const ssize_t bytes_sent = send(socket, p_buffer, remaining_bytes, 0);
+
+        if (-1 == bytes_sent)
+        {
+            break;
+        }
+
+        p_buffer += bytes_sent;
+        remaining_bytes -= bytes_sent;
+
+    } while ((remaining_bytes > 0) && retries);
+
+    return (0 == remaining_bytes);
+}
+
+operation_t receive_data_stream(int socket_fd, uint8_t *p_buffer, size_t *p_offset, size_t buffer_size)
+{
+    // Receives data until a complete command is received from the server
+    // Need to deal with partial commands that were segmented by TCP stack
+
+    operation_t operation = RECEIVED_CMD_ERROR;
+
+    const ssize_t received_bytes = recv(socket_fd, p_buffer + *p_offset, buffer_size - *p_offset, 0);
+
+    if (0 == received_bytes)
+    {
+        // Socket was disconnected by server:
+        return SOCKET_DISCONNECTED_BY_PEER;
+    }
+
+    if (-1 == received_bytes)
+    {
+        return RECEIVED_CMD_ERROR;
+    }
+
+    // Update number of bytes received:
+    *p_offset += received_bytes;
+
+    // Verify if a full command was received:
+    const uint8_t header_a = p_buffer[PROTOCOL_HEADER_BYTE_A_INDEX];
+    const uint8_t header_b = p_buffer[PROTOCOL_HEADER_BYTE_B_INDEX];
+
+    // Read expected command length:
+    // Length includes: CMD_BYTE + PAYLOAD only (CRC32 is not included)
+    uint16_t n_length = 0;
+    memcpy(&n_length, &p_buffer[PROTOCOL_HEADER_LENGTH_INDEX], sizeof(n_length));
+    const uint16_t length = ntohs(n_length);
+
+    if ((header_a != PROTOCOL_HEADER_BYTE_A) || (header_b != PROTOCOL_HEADER_BYTE_B))
+    {
+        operation = RECEIVED_CMD_ERROR;
+    }
+    else
+    {
+        const size_t full_command_size = sizeof(uint8_t) + sizeof(uint8_t) + sizeof(uint16_t) + length + sizeof(uint32_t);
+
+        if (full_command_size <= *p_offset)
+        {
+            // A full command was received now verify its CRC:
+            operation = is_crc32_valid(p_buffer, full_command_size) ? RECEIVED_CMD_FULL : RECEIVED_CMD_ERROR;
+        }
+        else
+        {
+            // A command was received partially, continue receiving data:
+            operation = RECEIVED_CMD_PARTIAL;
+        }
+    }
+
+    return operation;
 }

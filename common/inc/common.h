@@ -23,17 +23,28 @@
 #include <signal.h>
 #include <sys/socket.h>
 
-
-#define PRINT_DBG_MSGS  (1)
-#define SUCCESS         (0)
-
-#define DO_NOTHING()    do{}while(0)
+/**
+ * @brief Auxiliary steps to drive client`s FSM
+ *
+ */
+typedef enum
+{
+    START_RECEIVING_CMD = 0,
+    RECEIVED_CMD_ERROR,
+    RECEIVED_CMD_PARTIAL,
+    RECEIVED_CMD_FULL,
+    RECEIVED_FULL_FILE,
+    SOCKET_DISCONNECTED_BY_PEER
+} operation_t;
 
 // Rabin Fingerprint constants:
 #define RABIN_WINDOW_SIZE       (32u)
 #define RABIN_MIN_BLOCK_SIZE    (2u * 1024u)
 #define RABIN_AVG_BLOCK_SIZE    (4u * 1024u)
 #define RABIN_MAX_BLOCK_SIZE    (8u * 1024u)
+
+// Sanity check the maximum size of the file name:
+#define FILE_NAME_MAX_STRING_SIZE   (32)
 
 /**
  * @brief Enumeration of application running modes
@@ -105,11 +116,36 @@ const char * convert_to_hex(const uint8_t *p_input_buffer, int32_t length, char 
 bool is_crc32_valid(const uint8_t *p_buffer, const uint32_t length);
 
 /**
- * @brief Auxiliary function to return a 'struct in_addr' from a 'struct sockaddr' pointer
+ * @brief Finalizes constructing a command adding its length and CRC32 fields
  * 
- * @param p_sock_addr 'struct sockaddr' pointer
- * @return void* ' 
+ * @param p_buffer Buffer containing the command
+ * @param p_write_index [IN/OUT] write pointer
  */
-void *get_socket_in_addr_from_sockaddr(struct sockaddr *p_sock_addr);
+void command_add_length_and_crc32(uint8_t *p_buffer, uint16_t *p_write_index);
+
+/**
+ * @brief Transmit command stored in p_buffer
+ * 
+ * @param socket Socket that will send the command
+ * @param p_buffer Buffer containing the command
+ * @param size Command size in bytes
+ * @return true 
+ * @return false 
+ */
+bool command_transfer(int socket, const uint8_t *p_buffer, const uint16_t size);
+
+
+/**
+ * @brief Receives bytes from socket into a buffer for further processing
+ * 
+ * @param socket_fd Socket to receive data from
+ * @param p_buffer Buffer to store the data until a valid command is received
+ * @param p_offset Offset to write into p_buffer
+ * @param buffer_size Maximum size of p_buffer
+ * @return operation_t 
+ */
+operation_t receive_data_stream(int socket_fd, uint8_t *p_buffer, size_t *p_offset, size_t buffer_size);
+
+uint16_t payload_extract_length(const uint8_t *p_buffer);
 
 #endif //COMMON_HEADER_

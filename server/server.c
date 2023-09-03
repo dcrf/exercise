@@ -17,6 +17,8 @@
 #include "common.h"
 #include "server.h"
 #include "thpool.h"
+#include "sha256.h"
+#include "commands_codes.h"
 
 #include <sys/poll.h>
 #include <sys/types.h>
@@ -28,6 +30,10 @@
 #include <unistd.h>
 #include <errno.h>
 
+/**
+ * @brief Server context variable
+ * 
+ */
 typedef struct
 {
     volatile bool *p_run;
@@ -38,11 +44,33 @@ typedef struct
     int listening_socket;
 } server_app_ctx;
 
+/**
+ * @brief Server worker thread file transfer context
+ * 
+ */
+typedef struct server
+{
+    FILE *p_file_stream;
+    FILE *p_auxiliar_file;
+    uint8_t *p_buffer;    
+    size_t buffer_size;
+    size_t buffer_receive_offset;
+    struct pollfd fds[1];
+    operation_t operation;
+    uint8_t file_sha256_hash[SHA256_DIGEST_SIZE];
+    char file_name[FILE_NAME_MAX_STRING_SIZE + 1u];
+    int socket;
+} file_transfer_ctx;
+
+
 // Private auxiliary functions:
 static void cleanup(void);
 static int create_listening_socket(void);
 static int32_t server_process_clients(void);
-static void file_transfer_work_function(int client_socket);
+static void file_transfer_worker_function(int client_socket);
+static void server_send_ready_message(int client_socket, uint8_t *p_buffer);
+static void process_request_file_sts_cmd(file_transfer_ctx *p_ctx);
+static operation_t process_full_command(file_transfer_ctx *p_ctx);
 
 static server_app_ctx server = { 0 };
 
@@ -133,7 +161,7 @@ static int32_t server_process_clients(void)
                         // Do we have enough jobs available to process the new client socket ?
                         if (thpool_num_jobs_on_queue(server.pool) < SERVER_MAX_NUMBER_OF_WAITING_JOBS)
                         {
-                            thpool_add_work(server.pool, file_transfer_work_function, client_socket);
+                            thpool_add_work(server.pool, file_transfer_worker_function, client_socket);
                         }
                         else
                         {
@@ -156,18 +184,282 @@ static int32_t server_process_clients(void)
     return result;
 }
 
-static void file_transfer_work_function(int client_socket)
-{
-    uint8_t client_buffer[RABIN_MAX_BLOCK_SIZE + 64u];
+#if 0
 
-    // This function will take care of the client file transfer until it finishes or a shutdown is requested
-    while (*server.p_run)
+while ((*client.p_run) && (timeout_counter > 0))
     {
+        // Timeout every 5s to give a chance to "client.p_run" being evaluated
+        result = poll(pfds, 1, socket_timeout_ms);
 
+        const short revents = pfds[0].revents;
+
+        if (0 == result)
+        {
+            // Client socket has timed-out:
+            --timeout_counter;
+        }
+        else
+        {
+            // Reload timeout counter:
+            timeout_counter = CLIENT_COMMUNICATION_TIMEOUT_MS / socket_timeout_ms;
+
+            if (revents & POLLIN)
+            {
+                // Socket is ready to receive data from server
+
+                client.operation = receive_data_stream(client.socket, client.p_buffer, &client.buffer_receive_offset, client.buffer_size);
+
+                if (client.operation == RECEIVED_CMD_FULL)
+                {
+                    client.operation = process_full_command();
+                }
+                else if (client.operation == RECEIVED_CMD_ERROR)
+                {
+                    // Resets buffer to start receiving a new command:
+                    client.buffer_receive_offset = 0;
+                }
+                else if (client.operation == RECEIVED_CMD_PARTIAL)
+                {
+                    // Continue receiving data
+                }
+                else if(client.operation == SOCKET_DISCONNECTED_BY_PEER)
+                {
+                    printf("\r\nClient socket %d was disconnected by server side", client.socket);
+                    printf("\r\nExiting client application\r\n");
+                    result = -1;
+                    break;
+                }
+                else if (client.operation == RECEIVED_FULL_FILE)
+                {
+                    printf("\r\nExiting client application: File %s was updated\r\n", client.p_file_name);
+                    result = 0;
+                    break;
+                }
+            }
+            else // POLLERR | POLLHP
+            {
+                result = -1;
+                break;
+            }
+        }
     }
 
-    (void)(client_socket);
-    (void)(client_buffer);
+#endif
+
+static void file_transfer_worker_function(int client_socket)
+{
+    int32_t result = -1;
+
+    file_transfer_ctx ctx = {0};
+    memset(&ctx, 0x00, sizeof(ctx));
+
+    uint8_t client_buffer[RABIN_MAX_BLOCK_SIZE + 64u];
+
+    ctx.p_buffer = client_buffer;
+    ctx.buffer_size = sizeof(client_buffer);
+    ctx.socket = client_socket;
+
+    ctx.fds[0].fd = client_socket;
+    ctx.fds[0].events = POLLIN | POLLERR | POLLHUP;
+
+    const int socket_timeout_ms = 5000;
+
+    // Server triggers client that it can start the file process request:
+    server_send_ready_message(ctx.socket, ctx.p_buffer);
+
+    while (*server.p_run)
+    {
+        // Timeout every 5s to give a chance to "client.p_run" being evaluated
+        result = poll(ctx.fds, 1, socket_timeout_ms);
+
+        const short revents = ctx.fds[0].revents;
+
+        if (0 == result)
+        {
+            // Client socket has timed-out:
+        }
+        else
+        {
+            if (revents & POLLIN)
+            {
+                // Server has data to read from client`s socket:
+                ctx.operation = receive_data_stream(ctx.socket, ctx.p_buffer, &ctx.buffer_receive_offset, ctx.buffer_size);
+
+                if (ctx.operation == RECEIVED_CMD_FULL)
+                {
+                    ctx.operation = process_full_command(&ctx);
+                }
+                else if (ctx.operation == RECEIVED_CMD_ERROR)
+                {
+                    // Resets buffer to start receiving a new command:
+                    ctx.buffer_receive_offset = 0;
+                }
+                else if (ctx.operation == RECEIVED_CMD_PARTIAL)
+                {
+                    // Continue receiving data
+                }
+                else if (ctx.operation == SOCKET_DISCONNECTED_BY_PEER)
+                {
+                    printf("\r\nClient socket %d was disconnected", ctx.socket);
+                    printf("\r\nCancelling file operation for client - %d\r\n", ctx.socket);
+                    result = -1;
+                    break;
+                }
+            }
+        }
+    }
+
+    printf("\r\nFinishing client file transfer - %d", ctx.socket);
+
+    shutdown(ctx.socket, SHUT_RDWR);
+    close(ctx.socket);
+}
+
+static operation_t process_full_command(file_transfer_ctx *p_ctx)
+{
+    // Here we have a full command received from the client
+    // The command was sanity checked: protocol headers and CRC32.
+
+    // The protocol between client and server is very simple to make each command 'self-contained' in terms of
+    // processing and consequenct actions.
+    // The server will analyse the command received and start its consequent actions.
+
+    operation_t next_operation = START_RECEIVING_CMD;
+
+    // Reads command received:
+    const uint8_t command = p_ctx->p_buffer[PROTOCOL_HEADER_CMD_INDEX];
+
+    switch (command)
+    {
+        // This command is received by the server when the client side requests information about a specific file
+        // The server side will verify if:
+        // 1. File exists
+        // 2. If exists and have same or different contents based on its SHA256 digest
+        // 3. Send a response back to client with the file status
+        
+        case (REQUEST_FILE_STS_CMD):
+            process_request_file_sts_cmd(p_ctx);
+            break;
+#if 0
+        // This command is received by the client application with the status of the requested file on the server side.
+        // The client application will analyse the server response and choose its consequent actions:
+        // 1. Do nothing. Requested file does not exist on server.
+        // 2. Do nothing. Server and client files have the same contents (SHA256 digest)
+        // 3. Client application will request a file transfer to the server using Rabin blocks to save bandwidth or request a whole file transfer.
+        case (REQUEST_FILE_STS_SERVER_RESPONSE_CMD):
+            next_operation = process_request_file_status_server_response_cmd();
+            break;
+
+        // This command is received by the client application with a sequence of data slices send by the server side
+        // Each data slice can be a Rabin block to reduce bandwidth usage while updating the file, or a sequential
+        // data transfer where all bytes from the file will be transferred from the server to the client side.
+        // The client application will store the received slices into a temporary file (to avoid corrupting the original client file).
+        // Once all the slices were received from the server the client will update its local file with data from its temporary file.
+        // If Rabin fingerprints were used the temporary file should have only the data segments that are different between client and server`s file
+        case (REQUEST_FILE_TRANSFER_SERVER_RESPONSE_CMD):
+            next_operation = process_file_transfer_from_server_cmd();
+            break;
+#endif            
+
+        default:
+            break;
+    }
+
+    p_ctx->buffer_receive_offset = 0;
+
+    return next_operation;
+}
+
+static void process_request_file_sts_cmd(file_transfer_ctx *p_ctx)
+{
+    // Extract lenght info: CMD + PAYLOAD
+    const uint16_t length = payload_extract_length(p_ctx->p_buffer);
+
+    uint16_t offset_read = PROTOCOL_START_PAYLOAD_INDEX + 1u;
+
+    uint8_t remote_file_digest[SHA256_DIGEST_SIZE];
+    memset(remote_file_digest, 0x00, SHA256_DIGEST_SIZE);
+
+    // The command option carries information if client has included SHA-256 info in the payload:
+    const uint8_t command_option = p_ctx->p_buffer[PROTOCOL_START_PAYLOAD_INDEX];
+    
+    if (FILE_STATUS_WITH_HASH == command_option)
+    {
+        // Next 32 bytes contais SHA256 of client file:
+        memcpy(remote_file_digest, &p_ctx->p_buffer[offset_read], SHA256_DIGEST_SIZE);
+        offset_read += SHA256_DIGEST_SIZE;
+    }
+
+    // Copy client file name starting at 'offset_read':
+    uint16_t file_name_size = length - offset_read;
+    file_name_size = (file_name_size <= FILE_NAME_MAX_STRING_SIZE) ? file_name_size : FILE_NAME_MAX_STRING_SIZE;
+    memcpy(p_ctx->file_name, &p_ctx->p_buffer[offset_read], file_name_size);
+    p_ctx->file_name[FILE_NAME_MAX_STRING_SIZE] = 0x00;
+
+    // First sanity-check: Verify if the file exists on the server folder:
+    const bool is_file_present = file_exists(p_ctx->file_name);
+
+    // Second sanity-check: If file exists locally calculate its SHA-256 digest:
+    if (is_file_present)
+    {
+        // It is fine here to reuse the same 'ctx->p_buffer' that contains the received command
+        // All important information was already extracted and stored.
+        file_calculate_sha256(p_ctx->file_name, p_ctx->p_buffer, p_ctx->buffer_size, p_ctx->file_sha256_hash);
+    }
+
+    // Here prepare the response command back to the client:
+    uint16_t write_index = 0;
+
+    p_ctx->p_buffer[write_index++] = PROTOCOL_HEADER_BYTE_A;
+    p_ctx->p_buffer[write_index++] = PROTOCOL_HEADER_BYTE_B;
+
+    write_index += 2u; // Skip slot for the 16 bits length variable
+
+    // Command code:
+    p_ctx->p_buffer[write_index++] = REQUEST_FILE_STS_SERVER_RESPONSE_CMD;
+
+    // Prepare command sub-option:
+    uint8_t sub_option;
+
+    if (!is_file_present)
+    {
+        sub_option = FILE_DOES_NOT_EXIST_ON_SERVER;
+    }
+    else
+    {
+        if (0 == memcmp(p_ctx->file_sha256_hash, remote_file_digest, SHA256_DIGEST_SIZE))
+        {
+            // Remote and local files have same contents:
+            sub_option = FILE_EXIST_ON_SERVER_WITH_SAME_HASH;
+        }
+        else
+        {
+            // Remote and local files have different contents:
+            sub_option = FILE_EXIST_ON_SERVER_WITH_DIFFERENT_HASH;
+        }
+    }
+    
+    p_ctx->p_buffer[write_index++] = sub_option;
+
+    command_add_length_and_crc32(p_ctx->p_buffer, &write_index);
+    command_transfer(p_ctx->socket, p_ctx->p_buffer, write_index);
+}
+
+static void server_send_ready_message(int client_socket, uint8_t *p_buffer)
+{
+    // Constructs a 'SERVER_READY_CMD' command:
+    uint16_t write_index = 0;
+
+    p_buffer[write_index++] = PROTOCOL_HEADER_BYTE_A;
+    p_buffer[write_index++] = PROTOCOL_HEADER_BYTE_B;
+
+    write_index += 2u; // Skip slot for the 16 bits length variable
+
+    // Specify 'SERVER_READY_CMD' to send to server:
+    p_buffer[write_index++] = SERVER_READY_CMD;
+
+    command_add_length_and_crc32(p_buffer, &write_index);
+    command_transfer(client_socket, p_buffer, write_index);
 }
 
 static int create_listening_socket(void)

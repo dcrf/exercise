@@ -39,9 +39,6 @@ static void signal_handler(int signal);
 // Server mode auxiliary constant:
 #define APP_SERVER_PORT_INDEX               (2)    // network server 23456
 
-// Sanity check the maximum size of the file name:
-#define FILE_NAME_MAX_STRING_SIZE           (32)
-
 /**
  * @brief Used to request the application to shutdown itself
  *        All allocated resources will be freed and/or closed.
