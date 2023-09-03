@@ -69,6 +69,7 @@ typedef struct
     FILE *p_auxiliar_file;
     size_t buffer_size;
     size_t buffer_receive_offset;
+    size_t extra_bytes;
     operation_t operation;
     bool file_exists;
     uint8_t file_sha256_hash[SHA256_DIGEST_SIZE];
@@ -205,7 +206,11 @@ static int32_t process_file_transfer(void)
             {
                 // Socket is ready to receive data from server
 
-                client.operation = receive_data_stream(client.socket, client.p_buffer, &client.buffer_receive_offset, client.buffer_size);
+                client.operation = receive_data_stream(client.socket, 
+                                                       client.p_buffer, 
+                                                       &client.buffer_receive_offset, 
+                                                       &client.extra_bytes, 
+                                                       client.buffer_size);
 
                 if (client.operation == RECEIVED_CMD_FULL)
                 {
@@ -254,7 +259,7 @@ static operation_t process_full_command(void)
     // processing and consequenct actions.
     // The client side will receive a response from the server and trigger its consequent actions.
 
-    operation_t next_operation;
+    operation_t next_operation = START_RECEIVING_CMD;
 
     // Reads command received:
     const uint8_t command = client.p_buffer[PROTOCOL_HEADER_CMD_INDEX];
@@ -291,7 +296,9 @@ static operation_t process_full_command(void)
             break;
     }
 
-    client.buffer_receive_offset = 0;
+    uint8_t *p_source = client.p_buffer + client.buffer_receive_offset - client.extra_bytes;
+    memmove(client.p_buffer, p_source, client.extra_bytes);
+    client.buffer_receive_offset = client.extra_bytes;
 
     return next_operation;
 }
@@ -302,7 +309,6 @@ static operation_t process_file_transfer_from_server_cmd(void)
     // The data slices can be only the data segments that differs between the files or a a complete sequential file data transfer.
     // Both Rabin slices and complete data transfer slices will follow the same format:
     // offset (32 bits), length (16 bits), payload data (length bytes)
-
 
     // Using a random generic file to avoid corrupting local file during file transfer:
     if (client.p_auxiliar_file == NULL)
@@ -360,7 +366,8 @@ static void update_local_file_with_data_received(void)
     // Check if local file is open to receive data received from server and stored in the auxiliar local temporary file:
     if (client.p_file_stream == NULL)
     {
-        client.p_file_stream = fopen(client.p_file_name, "rw");
+        const char *p_mode = (client.file_exists) ? "rb+" : "wb+";
+        client.p_file_stream = fopen(client.p_file_name, p_mode);
     }
 
     // Set both files cursos offset to first position:
@@ -438,13 +445,13 @@ static operation_t process_request_file_status_server_response_cmd(void)
     {
         case (FILE_DOES_NOT_EXIST_ON_SERVER):
             printf("\r\nThe requested file %s does not exist on server side", client.p_file_name);
-            printf("\r\nClient application will finish");
+            printf("\r\nClient application will finish\r\n");
             next_operation = RECEIVED_FULL_FILE; // This operation will trigger the exit process.
             break;
 
         case (FILE_EXIST_ON_SERVER_WITH_SAME_HASH):
             printf("\r\nThe local and requested file %s have the same contents", client.p_file_name);
-            printf("\r\nClient application will finish");
+            printf("\r\nClient application will finish\r\n");
             next_operation = RECEIVED_FULL_FILE; // This operation will trigger the exit process.
             break;
 

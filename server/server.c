@@ -54,9 +54,10 @@ typedef struct server
 {
     FILE *p_file_stream;
     FILE *p_auxiliar_file;
-    uint8_t *p_buffer;    
+    uint8_t *p_buffer;
     size_t buffer_size;
     size_t buffer_receive_offset;
+    size_t extra_bytes;
     struct pollfd fds[1];
     operation_t operation;
     uint8_t file_sha256_hash[SHA256_DIGEST_SIZE];
@@ -73,6 +74,8 @@ static void file_transfer_worker_function(int client_socket);
 static void server_send_ready_message(int client_socket, uint8_t *p_buffer);
 static void process_request_file_sts_cmd(file_transfer_ctx *p_ctx);
 static operation_t process_full_command(file_transfer_ctx *p_ctx);
+static void process_request_file_transfer_cmd(file_transfer_ctx *p_ctx);
+static void server_sends_whole_file_no_fingerprints(file_transfer_ctx *p_ctx);
 
 static server_app_ctx server = { 0 };
 
@@ -204,7 +207,7 @@ static void file_transfer_worker_function(int client_socket)
     uint8_t client_buffer[RABIN_MAX_BLOCK_SIZE + 64u];
 
     ctx.p_buffer = client_buffer;
-    ctx.buffer_size = sizeof(client_buffer);
+    ctx.buffer_size = RABIN_MAX_BLOCK_SIZE;
     ctx.socket = client_socket;
 
     ctx.fds[0].fd = ctx.socket;
@@ -231,7 +234,7 @@ static void file_transfer_worker_function(int client_socket)
             if (revents & POLLIN)
             {
                 // Server has data to read from client`s socket:
-                ctx.operation = receive_data_stream(ctx.socket, ctx.p_buffer, &ctx.buffer_receive_offset, ctx.buffer_size);
+                ctx.operation = receive_data_stream(ctx.socket, ctx.p_buffer, &ctx.buffer_receive_offset, &ctx.extra_bytes, ctx.buffer_size);
 
                 if (ctx.operation == RECEIVED_CMD_FULL)
                 {
@@ -293,25 +296,17 @@ static operation_t process_full_command(file_transfer_ctx *p_ctx)
         case (REQUEST_FILE_STS_CMD):
             process_request_file_sts_cmd(p_ctx);
             break;
-#if 0
-        // This command is received by the client application with the status of the requested file on the server side.
-        // The client application will analyse the server response and choose its consequent actions:
-        // 1. Do nothing. Requested file does not exist on server.
-        // 2. Do nothing. Server and client files have the same contents (SHA256 digest)
-        // 3. Client application will request a file transfer to the server using Rabin blocks to save bandwidth or request a whole file transfer.
-        case (REQUEST_FILE_STS_SERVER_RESPONSE_CMD):
-            next_operation = process_request_file_status_server_response_cmd();
-            break;
 
-        // This command is received by the client application with a sequence of data slices send by the server side
-        // Each data slice can be a Rabin block to reduce bandwidth usage while updating the file, or a sequential
-        // data transfer where all bytes from the file will be transferred from the server to the client side.
-        // The client application will store the received slices into a temporary file (to avoid corrupting the original client file).
-        // Once all the slices were received from the server the client will update its local file with data from its temporary file.
-        // If Rabin fingerprints were used the temporary file should have only the data segments that are different between client and server`s file
-        case (REQUEST_FILE_TRANSFER_SERVER_RESPONSE_CMD):
-            next_operation = process_file_transfer_from_server_cmd();
+        // This command is received by the server when client is sending a request to update a file
+        // The client can request a file transfer based on Rabin fingerprints or a full file transfer.
+        case (REQUEST_FILE_TRANSFER_CMD):
+            process_request_file_transfer_cmd(p_ctx);
             break;
+#if 0
+
+        // Todo: Missing Rabin fingerprint processing
+        //       Application is segfaulting during a fwrite operation when receiving the whole data (for file > 1Mbyte)
+
 #endif            
 
         default:
@@ -323,9 +318,93 @@ static operation_t process_full_command(file_transfer_ctx *p_ctx)
     return next_operation;
 }
 
+static void process_request_file_transfer_cmd(file_transfer_ctx *p_ctx)
+{
+    // The command option will tell server if client is sending Rabin fingerprints or requesting a full file tranfer:
+    const uint8_t command_option = p_ctx->p_buffer[PROTOCOL_START_PAYLOAD_INDEX];
+
+    if (REQUEST_FILE_WITHOUT_RABIN == command_option)
+    {
+        // Send the whole local file into segments
+        // Each segment will be transferred using the format: offset (32 bits), length (16 bits), payload (lenght bytes)
+        // The last segment will contain a special command_option to let client side aware that the transmission has finised.
+        server_sends_whole_file_no_fingerprints(p_ctx);
+    }
+}
+
+static void server_sends_whole_file_no_fingerprints(file_transfer_ctx *p_ctx)
+{
+    if (NULL == p_ctx->p_file_stream)
+    {
+        // Open local file in read-only binary mode:
+        p_ctx->p_file_stream = fopen(p_ctx->file_name, "rb");
+    }
+
+    uint32_t slice_offset = 0u;
+
+    do
+    {
+        uint16_t write_index = 0;
+
+        p_ctx->p_buffer[write_index++] = PROTOCOL_HEADER_BYTE_A;
+        p_ctx->p_buffer[write_index++] = PROTOCOL_HEADER_BYTE_B;
+
+        write_index += 2u; // Skip slot for 16 bits length
+
+        p_ctx->p_buffer[write_index++] = REQUEST_FILE_TRANSFER_SERVER_RESPONSE_CMD;
+
+        // This option needs to be changed to 'FILE_TRANSFER_FINISH' in case this is the last command being sent to client:
+        p_ctx->p_buffer[write_index++] = FILE_TRANSFER_UPDATE;
+
+        size_t available_payload = p_ctx->buffer_size; // Buffer has extra space for protocol overhead and crc32
+
+        // Available payload must have space for a segment of at least one byte: offset, lenght, payload
+        while(available_payload >= (sizeof(uint32_t) + sizeof(uint16_t) + sizeof(uint8_t)))
+        {
+            uint8_t *p_offset = &p_ctx->p_buffer[write_index];
+            uint8_t *p_length = &p_ctx->p_buffer[write_index + sizeof(uint32_t)];
+            uint8_t *p_slice  = &p_ctx->p_buffer[write_index + sizeof(uint32_t) + sizeof(uint16_t)];
+
+            // Discard the space needed by the offset and lenght fields:
+            available_payload -= (sizeof(uint32_t) + sizeof(uint16_t));
+
+            // Read a slice of data from local file into memory buffer:
+            const size_t bytes_read = fread(p_slice, sizeof(uint8_t), available_payload, p_ctx->p_file_stream);
+            
+            if (bytes_read)
+            {
+                // Advance write_index because a new segment was added into the payload:
+                write_index += (sizeof(uint32_t) + sizeof(uint16_t));
+
+                const uint32_t n_offset = htonl(slice_offset);
+                memcpy(p_offset, &n_offset, sizeof(n_offset));
+
+                const uint16_t n_length = htons(bytes_read);
+                memcpy(p_length, &n_length, sizeof(n_length));
+
+                // For next interaction
+                slice_offset += bytes_read;
+                write_index += bytes_read;
+                available_payload -= bytes_read;
+            }
+            else
+            {
+                // Finish reading data from file:
+                // This is the last update command sent to client
+                p_ctx->p_buffer[PROTOCOL_START_PAYLOAD_INDEX] = FILE_TRANSFER_FINISH;
+                break;
+            }
+        }
+
+        command_add_length_and_crc32(p_ctx->p_buffer, &write_index);
+        command_transfer(p_ctx->socket, p_ctx->p_buffer, write_index);
+
+    } while (p_ctx->p_buffer[PROTOCOL_START_PAYLOAD_INDEX] == FILE_TRANSFER_UPDATE);
+}
+
 static void process_request_file_sts_cmd(file_transfer_ctx *p_ctx)
 {
-    // Extract lenght info: CMD + PAYLOAD
+    // Extract command lenght info: CMD + PAYLOAD
     const uint16_t length = payload_extract_length(p_ctx->p_buffer);
 
     uint16_t offset_read = PROTOCOL_START_PAYLOAD_INDEX + 1u;

@@ -169,7 +169,7 @@ bool command_transfer(int socket, const uint8_t *p_buffer, const uint16_t size)
     return (0 == remaining_bytes);
 }
 
-operation_t receive_data_stream(int socket_fd, uint8_t *p_buffer, size_t *p_offset, size_t buffer_size)
+operation_t receive_data_stream(int socket_fd, uint8_t *p_buffer, size_t *p_offset, size_t *p_extra_bytes, size_t buffer_size)
 {
     // Receives data until a complete command is received from the server
     // Need to deal with partial commands that were segmented by TCP stack
@@ -214,7 +214,9 @@ operation_t receive_data_stream(int socket_fd, uint8_t *p_buffer, size_t *p_offs
         {
             // A full command was received now verify its CRC:
             operation = is_crc32_valid(p_buffer, full_command_size) ? RECEIVED_CMD_FULL : RECEIVED_CMD_ERROR;
-        }
+
+            *p_extra_bytes = *p_offset - full_command_size;
+        }      
         else
         {
             // A command was received partially, continue receiving data:

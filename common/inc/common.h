@@ -144,8 +144,14 @@ bool command_transfer(int socket, const uint8_t *p_buffer, const uint16_t size);
  * @param buffer_size Maximum size of p_buffer
  * @return operation_t 
  */
-operation_t receive_data_stream(int socket_fd, uint8_t *p_buffer, size_t *p_offset, size_t buffer_size);
+operation_t receive_data_stream(int socket_fd, uint8_t *p_buffer, size_t *p_offset, size_t *p_extra_bytes, size_t buffer_size);
 
+/**
+ * @brief Helper function to convert length field from network to host format
+ * 
+ * @param p_buffer Buffer containing the lenght data
+ * @return uint16_t 
+ */
 uint16_t payload_extract_length(const uint8_t *p_buffer);
 
 #endif //COMMON_HEADER_
